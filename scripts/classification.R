@@ -3,6 +3,8 @@
 # Country: Kazakhstan
 
 library(tidyverse)
+library(ggplot2) # for plotting
+library(cluster) # for silhouette method
 
 # importing the cleaned data
 kz_data <- read.csv("data/Findex_Microdata_2025_Kazakhstan_clean.csv")
@@ -11,14 +13,14 @@ kz_data <- read.csv("data/Findex_Microdata_2025_Kazakhstan_clean.csv")
 # because we don't want to cluster based on financial behavior
 cluster_vars <- kz_data %>%
   select(
-    account, # do they have an account in the bank
-    dig_account, # digital account
-    anydigpayment,
-    merchantpay_dig,
-    pay_utilities,
-    saved,
-    borrowed,
-    internet_use
+    account, # do they have an account in the bank (binary)
+    dig_account, # digital account (binary)
+    anydigpayment, # digital payment (binary)
+    merchantpay_dig, # purchasing in digital channels (binary)
+    pay_utilities, # paying for house bills online (binary)
+    saved, # did the person save money (binary)
+    borrowed, # did the person borrow money (binary)
+    internet_use # does the person use the internet (binary)
   )
 
 # scaling every attribute for the PCA algorithm, so they are weighted
@@ -30,53 +32,103 @@ summary(pca_res)
 # saving PCA results for every row (person)
 pca_df <- as.data.frame(pca_res$x)
 
-pcaplot(
-  pca_df$PC1,
-  pca_df$PC2,
-  xlab = "PC1",
-  ylab = "PC2",
-  main = "PCA of financial behavior (Kazakhstan)"
+# plotting and saving pca visualisation
+pca_plot <- ggplot(pca_df, aes(x = PC1, y = PC2)) +
+  geom_point(size = 2, alpha = 0.7, , color="darkgreen") +
+  labs(
+    title = "PCA of Financial Behavior (Kazakhstan)",
+    x = "Principal Component 1",
+    y = "Principal Component 2"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
 )
 
+ggsave(
+  filename = "plots/pca_plot_kz.png",
+  plot = pca_plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
-### k-means
+### CLUSTERIZATION
+### K-MEANS
 
-#determine the optimal k
-wss <- sapply(1:10, function(k){
+# determine the optimal k
+# elbow method
+k_max = 10
+wss <- sapply(1:k_max, function(k){
   kmeans(cluster_scaled, centers = k, nstart = 25)$tot.withinss
 })
 
-# Plot Elbow
-plot(1:10, wss, type = "b", pch = 19,
-     xlab = "Number of clusters K",
-     ylab = "Total within-clusters sum of squares",
-     main = "Elbow Method for Optimal k")
+elbow_df <- data.frame(
+  k = 1:k_max,
+  wss = wss
+)
 
-# automatic elbow detection (first significant drop)
-wss_diff <- diff(wss)
+wss_diff <- diff(elbow_df$wss)
 optimal_k_elbow <- which.max(-wss_diff[-1]) + 1
-cat("Optimal k by Elbow method:", optimal_k_elbow, "\n")
-abline(v = optimal_k_elbow, col = "red", lty = 2)
-# the result shows 2 but I prefer 3
 
-# Silhouette method for optimal k
-# ----------------------------
-sil_values <- sapply(2:10, function(k){
-  km <- kmeans(cluster_scaled, centers = k, nstart = 25)
-  ss <- silhouette(km$cluster, dist(cluster_scaled))
-  mean(ss[, 3])
+# Plot Elbow
+k_elbow_plot = ggplot(elbow_df, aes(x = k, y = wss)) +
+  geom_line(color="darkgreen", linewidth = 0.75) +
+  geom_point(color = "darkgreen", size = 2) +
+  labs(
+    title = "Elbow method for Optimal Number of Clusters",
+    x = "k",
+    y = "Within-Cluster Sum of Squares"
+  ) +
+  geom_vline(
+    xintercept = optimal_k_elbow,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+  
+ggsave(
+  filename = "plots/optimal_k_elbow_method.png",
+  plot = k_elbow_plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+# silhouette method
+sil_values <- sapply(2:k_max, function(k){
+  km_res <- kmeans(cluster_scaled, centers = k, nstart = 25)
+  sil <- silhouette(km_res$cluster, dist(cluster_scaled))
+  mean(sil[, 3])
 })
 
-optimal_k_sil <- which.max(sil_values) + 1
-cat("Optimal k by Silhouette method:", optimal_k_sil, "\n")
+optimal_k_sil = which.max(sil_values) + 1
 
-plot(2:10, sil_values, type = "b", pch = 19,
-     xlab = "Number of clusters K",
-     ylab = "Average Silhouette Width",
-     main = "Silhouette Method for Optimal k")
-abline(v = optimal_k_sil, col = "blue", lty = 2)
+sil_df <- data.frame(
+  k = 2:k_max,
+  silhouette_width = sil_values
+)
+
+sil_plot <- ggplot(sil_df, aes(x = k, y = silhouette_width)) +
+  geom_line(color = "darkgreen", linewidth = 0.75) +
+  geom_point(color = "darkgreen", size = 2) +
+  geom_vline(
+    xintercept = optimal_k_silhouette,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  labs(
+    title = "Silhouette Method for Optimal Number of Clusters",
+    x = "Number of clusters (k)",
+    y = "Average silhouette width"
+  ) + 
+  theme_minimal(base_size = 13)
 # shows k=2 as well but I will use k=3 for this data
 
+# clustering + visualization
 set.seed(123)
 # k_final <- max(optimal_k_elbow, optimal_k_sil)
 ########## I like k=3 more so
@@ -86,15 +138,19 @@ kmeans_res <- kmeans(cluster_scaled, centers = k_final, nstart = 25)
 pca_df$cluster <- factor(kmeans_res$cluster)
 cluster_vars$cluster <- kmeans_res$cluster
 
-plot(
-  pca_df$PC1,
-  pca_df$PC2,
-  col = pca_df$cluster,
-  pch = 19,
-  xlab = "PC1",
-  ylab = "PC2",
-  main = "Clusters of financial behavior (k = 3)"
-)
+clusters_plot <- ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(
+    title = "PCA of Financial Behavior with k-means clusters",
+    x = "Principal Component 1",
+    y = "Principal Component 2",
+  ) +
+  scale_color_brewer(palette = "Set1") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"
+  )
 
 ### adding demographics - aka profiling of clusters
 # female
@@ -120,8 +176,6 @@ data_with_clusters %>%
     share_employed = mean(emp_in == 1)
   )
 
-library(ggplot2)
-
 #gender distribution graphic
 ggplot(data_with_clusters, aes(x = factor(cluster_k3), fill = factor(female))) +
   geom_bar(position = "fill") +
@@ -140,5 +194,29 @@ ggplot(data_with_clusters, aes(x = factor(cluster_k3), y = age)) +
     y = "Age",
     title = "Age distribution by cluster"
   )
+
+###
+
+pca_scores <- pca_res$x[, 1:2]
+dist_mat <- dist(pca_scores, method = "euclidean")
+hc <- hclust(dist_mat, method = "ward.D2")
+plot(hc, labels = FALSE, main = "Hierarchical clustering dendrogram")
+rect.hclust(hc, k = 3, border = 2:4)
+
+clusters_hc <- cutree(hc, k = 3)
+clustered_data <- cluster_vars %>%
+  mutate(hc_cluster = clusters_hc)
+library(dendextend)
+dend <- as.dendrogram(hc)
+dend_col <- color_branches(dend, k = 3)
+plot(dend_col)
+
+table(kmeans_cluster = kmeans_res$cluster,
+      hc_cluster = clusters_hc)
+
+library(mclust)
+
+ari <- adjustedRandIndex(kmeans_res$cluster, clusters_hc)
+cat("Adjusted Rand Index:", ari, "\n")
 
 
