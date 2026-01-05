@@ -11,74 +11,6 @@ library(dplyr)
 # importing the cleaned data
 kz_data <- read.csv("data/Findex_Microdata_2025_Kazakhstan_clean.csv")
 
-### CHOOSING ATTRIBUTES FOR CLUSTERIZATION
-# correlation matrix
-
-numeric_vars <- kz_data %>%
-  select(where(is.numeric))
-
-corr_matrix_all <- cor(
-  numeric_vars,
-  use = "pairwise.complete.obs"
-)
-
-# посмотреть первые значения
-round(corr_matrix_all[1:6, 1:6], 2)
-
-corr_df <- as.data.frame(as.table(corr_matrix_all))
-colnames(corr_df) <- c("var1", "var2", "value")
-
-ggplot(corr_df, aes(x = var1, y = var2, fill = value)) +
-  geom_tile() +
-  scale_fill_gradient2(
-    low = "blue",
-    mid = "white",
-    high = "red",
-    midpoint = 0,
-    limits = c(-1, 1),
-    name = "Correlation"
-  ) +
-  theme_minimal(base_size = 5) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.title = element_blank()
-  ) +
-  coord_fixed() +
-  labs(title = "Correlation Matrix (All Numeric Variables)")
-
-corr_df_filtered <- corr_df %>%
-  filter(var1 != var2) %>%
-  mutate(
-    var1 = as.character(var1),
-    var2 = as.character(var2),
-    pair = paste(pmin(var1, var2), pmax(var1, var2), sep = " ")
-  ) %>%
-  distinct(pair, .keep_all = TRUE)
-
-print(high_corr)
-
-corr_thresh <- 0.7
-
-high_corr_pairs <- corr_df_filtered %>%
-  filter(abs(value) >= corr_thresh) %>%
-  select(var1, var2)
-
-g <- graph_from_data_frame(high_corr_pairs, directed = FALSE)
-components <- components(g)
-group_list <- split(names(components$membership), components$membership)
-
-# we leave only 1 attribute in the graph group
-
-# we delete:
-# anydigpayment dig_account merchantpay_dig fin25e2 account_fin = account
-# fin32 = receive_wages
-# fin37 = receive_transfers
-# fin38 = receive_pensions
-# fin42 = receive_agriculture
-# fin30 = pay_utilities
-# fh1 and fh2 = domestic_remittances
-
-
 # only behavioral attributes without age, gender and other
 # because we don't want to cluster based on financial behavior
 
@@ -138,7 +70,7 @@ pca_plot <- ggplot(pca_df, aes(x = PC1, y = PC2)) +
   theme_minimal(base_size = 13) +
   theme(
     plot.title = element_text(hjust = 0.5)
-)
+  )
 
 ggsave(
   filename = "plots/pca_plot_kz.png",
@@ -184,7 +116,7 @@ k_elbow_plot = ggplot(elbow_df, aes(x = k, y = wss)) +
   theme(
     plot.title = element_text(hjust = 0.5)
   )
-  
+
 ggsave(
   filename = "plots/optimal_k_elbow_method.png",
   plot = k_elbow_plot,
