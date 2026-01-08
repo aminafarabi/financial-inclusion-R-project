@@ -33,7 +33,7 @@ fin_binary_vars <- c(
 
 binary_vars <- c(
   "emp_in",
-  "urbanicity",
+  "urbanicity"
 )
 
 receive_vars <- c(
@@ -62,8 +62,17 @@ ordinal_to_numeric <- function(x, na_vals = c(5,6)) {
   return(as.numeric(x))
 }
 
-receive_to_numeric <- function(x, na_vals = c(5)) {
-  x[x %in% na_vals] <- NA  # never, DK, refused → NA
+receive_to_numeric <- function(x) {
+  x[x %in% c(5)] <- NA
+  x[x %in% c(1, 2, 3)] <- 1
+  x[x == 4] <- 0
+  return(as.numeric(x))
+}
+
+receive_to_numeric_dom <- function(x) {
+  x[x %in% c(4)] <- NA
+  x[x %in% c(1, 2)] <- 1
+  x[x == 3] <- 0
   return(as.numeric(x))
 }
 
@@ -76,7 +85,7 @@ kz_data$fin24 <- ordinal_to_numeric(kz_data$fin24, na_vals = c(8,9))
 kz_data$fin45 <- ordinal_to_numeric(kz_data$fin45, na_vals = c(7,8))
 
 kz_data[receive_vars] <- lapply(kz_data[receive_vars], receive_to_numeric)
-kz_data$domestic_remittances <- ordinal_to_numeric(kz_data$domestic_remittances, na_vals = c(4))
+kz_data$domestic_remittances <- receive_to_numeric_dom(kz_data$domestic_remittances)
 
 # na cleaning again cause we added NAs
 kz_data <- null_values_data_clean(kz_data) # 57
@@ -124,8 +133,6 @@ corr_df_filtered <- corr_df %>%
     pair = paste(pmin(var1, var2), pmax(var1, var2), sep = " ")
   ) %>%
   distinct(pair, .keep_all = TRUE)
-
-print(high_corr)
 
 corr_thresh <- 0.7
 
