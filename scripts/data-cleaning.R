@@ -6,6 +6,10 @@ library(igraph)
 
 rm(list = ls())
 
+# --------------------------------------------------
+# DATA CLEANING
+# --------------------------------------------------
+
 kz_data <- read.csv("data/Findex_Microdata_2025_Kazakhstan.csv") # 183 vars
 
 # removing metadata and unnecessary survey variables
@@ -13,8 +17,9 @@ kz_data <- kz_data %>%
   select(-c(economy, year, economycode, regionwb, pop_adult, wpid_random, wgt)) %>%
   select(-starts_with("con")) # 124 vars
 
+# removing variables that are for more than 30% NA
+# creating function cause we need to remove NA twice
 null_values_data_clean <- function(data, na_threshold = 0.3) {
-  # removing variables that are mostly NA with the set threshold
   data <- data %>%
     select(where(~ mean(is.na(.)) < na_threshold))
   return(data)
@@ -22,7 +27,19 @@ null_values_data_clean <- function(data, na_threshold = 0.3) {
 
 kz_data <- null_values_data_clean(kz_data) # 57 vars
 
-# correcting variables
+# --------------------------------------------------
+# MODIFYING VARIABLES 
+# --------------------------------------------------
+# most of the variables in the survey are coded
+# we change the values to meet standard binary notation
+# and remove answers like "I don't know" and "Refused"
+
+# Binary vars --------------------------------------
+# 1 - yes
+# 2 - no
+# 3 - DK
+# 4 - refused
+
 fin_binary_vars <- c(
   "fin2","fin3","fin4","fin8","fin9a","fin9b","fin10",
   "fin17a","fin17c","fin19","fin20",
@@ -31,10 +48,24 @@ fin_binary_vars <- c(
   "fh2a", "fin30","fin32","fin37","fin38","fin42"
 )
 
-binary_vars <- c(
-  "emp_in",
-  "urbanicity"
-)
+# 1 - yes, 0 - no
+code_to_binary <- function(x) {
+  x[x %in% c(3,4)] <- NA 
+  x <- ifelse(x == 1, 1,
+              ifelse(x == 2, 0, NA))
+  return(x)
+}
+
+kz_data[fin_binary_vars] <- lapply(kz_data[fin_binary_vars], code_to_binary)
+
+# receive vars -------------------------------------
+# 1 - received in account
+# 2 - received in cash
+# 3 - received via some other method
+# 4 - didn't receive
+# 5 - DK/refused
+# we make these vars binary (received/not received) 
+# because for k-means different values should be equally different
 
 receive_vars <- c(
   "receive_wages",
@@ -44,54 +75,48 @@ receive_vars <- c(
   "pay_utilities"
 )
 
+kz_data$domestic_remittances <- ifelse(
+  kz_data$domestic_remittances %in% c(1, 2), 1,
+  ifelse(kz_data$domestic_remittances == 3, 0, NA)
+)
 
-binary_to_numeric <- function(x) {
-  x[x %in% c(3,4)] <- NA
-  x <- ifelse(x == 1, 1,
-              ifelse(x == 2, 0, NA))
-  return(x)
-}
-
-kz_data[fin_binary_vars] <- lapply(kz_data[fin_binary_vars], binary_to_numeric)
-
-fin_ordinal_freq_vars <- c("fin5","fin6", "fin24b")
-
-# 1 - weekly, 2 - monthly, 3 - less than a month, 4 - never, 5 and 6 - NA
-ordinal_to_numeric <- function(x, na_vals = c(5,6)) {
-  x[x %in% na_vals] <- NA  # never, DK, refused → NA
-  return(as.numeric(x))
-}
-
-receive_to_numeric <- function(x) {
+receive_to_binary <- function(x) {
   x[x %in% c(5)] <- NA
   x[x %in% c(1, 2, 3)] <- 1
   x[x == 4] <- 0
-  return(as.numeric(x))
+  return(x)
 }
 
-receive_to_numeric_dom <- function(x) {
-  x[x %in% c(4)] <- NA
-  x[x %in% c(1, 2)] <- 1
-  x[x == 3] <- 0
-  return(as.numeric(x))
-}
+kz_data[receive_vars] <- lapply(kz_data[receive_vars], receive_to_binary)
 
-kz_data[fin_ordinal_freq_vars] <- lapply(kz_data[fin_ordinal_freq_vars], ordinal_to_numeric)
+# ordinal variables --------------------------------
+# 1 - weekly 
+# 2 - monthly
+# 3 - less than a month
+# 4 - never
+# 5 and 6 - NA
+# fin25e3 and fin24a have 3 codes instead of 4
+fin_freq_vars <- c("fin5","fin6", "fin24b")
+
+ordinal_to_numeric <- function(x, na_vals = c(5,6)) {
+  x[x %in% na_vals] <- NA  # never, DK, refused → NA
+  return(x)
+}
 
 kz_data$fin25e3 <- ordinal_to_numeric(kz_data$fin25e3, na_vals = c(4,5))
 kz_data$fin24a <- ordinal_to_numeric(kz_data$fin24a, na_vals = c(4,5))
+kz_data[fin_freq_vars] <- lapply(kz_data[fin_freq_vars], ordinal_to_numeric)
 
+# nominal variables --------------------------------
 kz_data$fin24 <- ordinal_to_numeric(kz_data$fin24, na_vals = c(8,9))
 kz_data$fin45 <- ordinal_to_numeric(kz_data$fin45, na_vals = c(7,8))
 
-kz_data[receive_vars] <- lapply(kz_data[receive_vars], receive_to_numeric)
-kz_data$domestic_remittances <- receive_to_numeric_dom(kz_data$domestic_remittances)
+# NA cleaning again cause DK/refused became NA
+kz_data <- null_values_data_clean(kz_data) # 57 vars
 
-# na cleaning again cause we added NAs
-kz_data <- null_values_data_clean(kz_data) # 57
-
-
-### correlation matrix to remove unnecessary variables
+# --------------------------------------------------
+# CORRELATION MATRIX TO REMOVE UNNECESSARY VARIABLES
+# --------------------------------------------------
 corr_data <- kz_data %>%
   mutate(across(where(is.factor), ~ as.numeric(as.character(.)))) %>%
   select(where(is.numeric))
@@ -100,9 +125,6 @@ corr_matrix_all <- cor(
   corr_data,
   use = "pairwise.complete.obs"
 )
-
-# посмотреть первые значения
-round(corr_matrix_all[1:6, 1:6], 2)
 
 corr_df <- as.data.frame(as.table(corr_matrix_all))
 colnames(corr_df) <- c("var1", "var2", "correlation")
@@ -134,20 +156,19 @@ corr_df_filtered <- corr_df %>%
   ) %>%
   distinct(pair, .keep_all = TRUE)
 
+# removing variables with correlation higher than 70%
 corr_thresh <- 0.7
 
 high_corr_pairs <- corr_df_filtered %>%
   filter(abs(correlation) >= corr_thresh) %>%
   select(var1, var2)
 
-g <- graph_from_data_frame(high_corr_pairs, directed = FALSE)
-components <- components(g)
+components <- components(graph_from_data_frame(high_corr_pairs, directed = FALSE))
 group_list <- split(names(components$membership), components$membership)
 
-# we leave only 1 attribute in the graph group
-
+# we leave only 1 attribute in the list of similar attributes
 # we delete:
-# "anydigpayment" "dig_account" "merchantpay_dig" "fin3" "fin25e2" "account_fin" = account 
+# anydigpayment dig_account merchantpay_dig fin3 fin25e2 account_fin = account 
 # fin32 = receive_wages
 # fin37 = receive_transfers
 # fin38 = receive_pensions
@@ -172,40 +193,32 @@ kz_data <- kz_data %>%
     -fh2
   ) # 44 vars
 
-
-### data imputation
-# mod
+# --------------------------------------------------
+# DATA IMPUTATION
+# --------------------------------------------------
+# mode function for binary variables
 get_mode <- function(x) {
-  ux <- na.omit(x)
-  if (length(ux) == 0) return(NA)
-  names(sort(table(ux), decreasing = TRUE))[1]
+  names(sort(table(na.omit(x)), decreasing = TRUE))[1]
 }
 
-impute_missing <- function(df) {
-  df_imputed <- df
-  
-  for (col in names(df_imputed)) {
-    x <- df_imputed[[col]]
+impute_missing <- function(data) {
+  for (col in names(data)) {
+    x <- data[[col]]
     if (!any(is.na(x))) next
-    
-    if (is.numeric(x)) {
-      df_imputed[[col]][is.na(x)] <- median(x, na.rm = TRUE)
-      
-    } else {
+    if (col == "age") {  # the only continuous var
+      data[[col]][is.na(x)] <- median(x, na.rm = TRUE)
+    } else {  # all others are discrete
       mode_val <- get_mode(x)
-      df_imputed[[col]][is.na(x)] <- mode_val
-      df_imputed[[col]] <- droplevels(df_imputed[[col]])
+      data[[col]][is.na(x)] <- mode_val
     }
   }
-  
-  return(df_imputed)
+  return(data)
 }
 
-
 kz_data <- impute_missing(kz_data)
+# checking there are no NAs
 colSums(is.na(kz_data))[colSums(is.na(kz_data)) > 0]
-
-
+# saving into the file
 fwrite(kz_data, "data/Findex_Microdata_2025_Kazakhstan_clean.csv")
 
 
