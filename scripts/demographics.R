@@ -81,13 +81,6 @@ demo_income <- kz_data %>%
   group_by(km3) %>%
   mutate(share = n / sum(n))
 
-demo_fin24 <- kz_data %>%
-  group_by(km3, fin24) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  group_by(km3) %>%
-  mutate(share = n / sum(n)) %>%
-  arrange(km3, desc(share))
-
 # -----------------------------------------
 # plots
 # -----------------------------------------
@@ -239,4 +232,3 @@ ggsave(
   height = 4,
   dpi = 300
 )
-

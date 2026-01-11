@@ -1,150 +1,187 @@
-# ============================================
-# CLASSIFICATION AND CLUSTERING ANALYSIS
-# COUNTRY: ITALY
-# ============================================
-
-library(tidyverse)
+library(dplyr)
 library(caret)
 library(randomForest)
-library(e1071)
-library(factoextra)
-library(cluster)
-# ----------------------------
-# 1. DATA IMPORT AND PREPARATION
-# ----------------------------
 
-# Importing Italian data
-it_data <- read.csv("data/Findex_Microdata_2025_Italy_clean.csv")
+rm(list = ls())
 
+kz_data <- read.csv("data/Findex_Microdata_2025_Kazakhstan_clean.csv")
 
-# Check for missing values
-colSums(is.na(it_data))
+kz_data$target <- factor(
+  kz_data$fin24,
+  levels = 1:7,
+  labels = c(
+    "Savings",
+    "FamilyRelativesFriends",
+    "Other",
+    "Borrowing",
+    "Other",
+    "Other",
+    "CouldNotComeUpWithmoney"
+  )
+)
 
-# ----------------------------
-# 2. DATA CLEANING
-# ----------------------------
-
-# Replace empty strings with NA
-it_data[it_data == ""] <- NA
-
-cluster_vars_it <- it_data %>%
+sup_data <- kz_data %>%
   select(
-    account,          # financial account ownership (convert to numeric)
-    domestic_remittances, # domestic remittances
-    fin2,             # financial inclusion indicator
-    internet_use,     # internet usage
-    age,              # age (numeric)
-    emp_in,           # employment status
-    inc_q             # income quartile
+    target,
+    #age,
+    female,
+    educ,
+    inc_q,
+    emp_in,
+    borrowed,
+    receive_pensions,
+    receive_wages,
+    account_mob,
+    domestic_remittances,
+    fin22a,
+    fin17c,
+    fin19,
+    fin24a
   )
 
+sup_data <- sup_data %>%
+  mutate(across(everything(), factor))
 
-# ============================================
-# PCA + K-MEANS CLUSTERING (Italy)
-# ============================================
-
-# ----------------------------
-# 1. DATA PREPARATION
-# ----------------------------
-
-# Выбираем переменные для кластеризации
-cluster_vars_it <- it_data %>%
-  select(
-    account,               # фактор (0/1)
-    #domestic_remittances,  # фактор
-    fin2,                  # фактор
-    internet_use,          # фактор
-    age,                   # числовой
-    emp_in,                # фактор
-    inc_q                  # фактор (1-4)
-  )
-
-# Убираем пропуски
-cluster_vars_complete <- na.omit(cluster_vars_it)
-
-# Преобразуем факторы в числа
-cluster_numeric <- cluster_vars_complete %>%
-  mutate(across(where(is.factor), ~ as.numeric(as.character(.))))
-
-# Проверим данные
-summary(cluster_numeric)
-
-# Масштабируем числовые данные
-cluster_scaled <- scale(cluster_numeric)
-
-# ----------------------------
-# 2. PCA (Principal Component Analysis)
-# ----------------------------
-
-pca_res <- prcomp(cluster_scaled, center = TRUE, scale. = TRUE)
-summary(pca_res)  # доля объясненной дисперсии
-
-# Преобразуем PCA в датафрейм для визуализации
-pca_df <- as.data.frame(pca_res$x)
-
-# ----------------------------
-# 3. DETERMINING OPTIMAL NUMBER OF CLUSTERS
-# ----------------------------
-
-sil_values <- sapply(2:10, function(k){
-  km <- kmeans(cluster_scaled, centers = k, nstart = 25)
-  ss <- silhouette(km$cluster, dist(cluster_scaled))
-  mean(ss[, 3])  # среднее значение силуэта
-})
-
-optimal_k <- which.max(sil_values) + 1  # +1, так как индекс начинается с 2
-cat("Оптимальное количество кластеров по Silhouette:", optimal_k, "\n")
-
-
-wss <- sapply(1:10, function(k){
-  kmeans(cluster_scaled, centers = k, nstart = 25)$tot.withinss
-})
-
-# Автоматический расчет локтя (метод "first significant drop")
-# Простая эвристика: точка с наибольшим уменьшением WSS
-wss_diff <- diff(wss)
-optimal_k <- which.max(-wss_diff[-1]) + 1  # +1 из-за смещения индекса
-cat("Оптимальное количество кластеров по Elbow Method:", optimal_k, "\n")
-
-# ----------------------------
-# 4. K-MEANS CLUSTERING
-# ----------------------------
+sup_all <- sup_data %>%
+  filter(target != "Other") %>%
+  droplevels()
 
 set.seed(123)
-k_opt <- 3  # допустим, по Elbow метод определено k=3
-kmeans_res <- kmeans(cluster_scaled, centers = k_opt, nstart = 25)
+train_index <- createDataPartition(sup_all$target, p = 0.7, list = FALSE)
+train_data <- sup_all[train_index, ]
+test_data  <- sup_all[-train_index, ]
 
-# Добавляем метки кластеров
-cluster_results <- cluster_vars_complete %>%
-  mutate(cluster = as.factor(kmeans_res$cluster))
+# random forest
 
-# ----------------------------
-# 5. VISUALIZATION IN PCA SPACE
-# ----------------------------
+rf_model <- randomForest(target ~ ., data = train_data, ntree = 500, importance = TRUE)
 
-ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster_results$cluster)) +
-  geom_point(alpha = 0.7, size = 2) +
-  labs(title = "K-means Clustering (Italy) in PCA Space",
-       x = "PC1",
-       y = "PC2",
-       color = "Cluster") +
-  theme_minimal()
+# predictions
+rf_pred <- predict(rf_model, newdata = test_data)
 
-# ----------------------------
-# 6. CLUSTER PROFILE
-# ----------------------------
+# confusion matrix
+confusionMatrix(rf_pred, test_data$target)
 
-cluster_profile <- cluster_results %>%
-  group_by(cluster) %>%
-  summarise(
-    n = n(),
-    account_rate = mean(as.numeric(account) - 1),
-    internet_use_rate = mean(as.numeric(internet_use) - 1),
-    avg_age = mean(age, na.rm = TRUE),
-    avg_income = mean(as.numeric(inc_q), na.rm = TRUE),
-    employment_rate = mean(as.numeric(emp_in) - 1)
+importance(rf_model)
+varImpPlot(rf_model)
+
+# -----------------------------
+# plotting
+rf_prob <- predict(rf_model, newdata = test_data, type = "prob")
+rf_prob_df <- as.data.frame(rf_prob)
+
+# добавляем столбец с истинными классами
+rf_prob_df$true_class <- test_data$target
+
+# long формат для ggplot
+prob_long_rf <- rf_prob_df %>%
+  pivot_longer(
+    cols = -true_class,
+    names_to = "predicted_class",
+    values_to = "probability"
   )
 
-print("Cluster Profiles:")
-print(cluster_profile)
+#rf_prob$true_class <- test_data$target
+
+# Переводим в long формат для ggplot
+prob_long_rf <- rf_prob_df %>%
+  pivot_longer(
+    cols = -true_class,
+    names_to = "predicted_class",
+    values_to = "probability"
+  )
+
+# plot
+rf_prob_plot <- ggplot(prob_long_rf, aes(
+  x = predicted_class,
+  y = probability,
+  fill = true_class
+)) +
+  stat_summary(fun = mean, geom = "col", position = "dodge") +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Average predicted probabilities by actual class (Random Forest)",
+    x = "Predicted category",
+    y = "Average predicted probability",
+    fill = "Actual class"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+rf_prob_plot
+
+
+# -----------------------------------
+# CV method
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  savePredictions = "final"   # <- важно для CV графика
+)
+
+
+rf_model_cv <- train(
+  target ~ .,
+  data = sup_all,
+  method = "rf",
+  trControl = train_control,
+  ntree = 500
+)
+
+
+cv_preds <- rf_model_cv$pred
+
+cv_preds$predicted_class <- factor(cv_preds$pred, levels = levels(sup_all$target))
+cv_preds$true_class <- factor(cv_preds$obs, levels = levels(sup_all$target))
+
+#plotting
+class_cols <- levels(train_data$target)
+
+prob_long_cv <- cv_preds %>%
+  select(pred, obs, all_of(class_cols)) %>%
+  pivot_longer(
+    cols = all_of(class_cols),
+    names_to = "predicted_class",
+    values_to = "probability"
+  ) %>%
+  rename(true_class = obs)
+
+rf_cv_plot <- ggplot(prob_long_cv, aes(
+  x = predicted_class,
+  y = probability,
+  fill = true_class
+)) +
+  stat_summary(fun = mean, geom = "col", position = "dodge") +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Average predicted probabilities by actual class (Random Forest CV)",
+    x = "Predicted class",
+    y = "Average predicted probability",
+    fill = "Actual class"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+rf_cv_plot
+
+ggsave(
+  filename = "plots/rf_plot.png",
+  plot = rf_prob_plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+ggsave(
+  filename = "plots/rf_cv_plot.png",
+  plot = rf_cv_plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
 
