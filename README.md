@@ -18,13 +18,13 @@ Financial institutions and policymakers need to understand digital adoption gaps
 
 ## Result (Quantified Outcomes)
 - **3 distinct consumer segments** identified, explaining financial inclusion heterogeneity
-<img src="output/plots/km3_plot.png" width="300" alt="Three consumer segments visualized along PC1 and PC2 axes">
+<img src="plots/km3_plot.png" width="400" alt="Three consumer segments visualized along PC1 and PC2 axes">
 
 - **Supervised models** achieved balanced accuracy of **0.55–0.68** across emergency funding classes
 - **Specificity >0.87** across models (strong identification of non-members)
 - **Random forest** showed highest balanced accuracy for Borrowing class: **0.665**
 - **Top predictors** of emergency funding: savings behavior, formal borrowing history, pension receipt, education level, income quartile
-<img src="plots/multinom_all_vars_plot.png" width="300" alt="Emergency funding prediction">
+<img src="plots/multinom_all_vars_plot.png" width="400" alt="Emergency funding prediction">
 
 ## Quick Reference – Consumer Segments
 
